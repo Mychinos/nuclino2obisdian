@@ -10,22 +10,27 @@ export type FileWriteRequest = {
 }
 
 export type FileHelperOptions = {
-    imageFolderName: string
+    fileFolderName: string,
+    itemMapName: string,
+    basePath: string
 }
 
 const defaultFileHelperOptions: FileHelperOptions = {
-    imageFolderName: 'Images'
+    fileFolderName: 'Files',
+    itemMapName: 'itemMap.json',
+    basePath: join(__dirname, '..', 'Cloned Workspaces')
 }
 
 export class FileHelper {
-    basePath: string = ''
+    basePath: string
     options: FileHelperOptions
     constructor(private log: SLogger.Logger, options = defaultFileHelperOptions) {
-        this.options = {...defaultFileHelperOptions, ...options}
+        this.options = { ...defaultFileHelperOptions, ...options }
+        this.basePath = this.options.basePath
     }
 
     async downloadImageToDisk(url: string, fileName: string, forceOverwrite = false) {
-        return this.downloadFileToDisk(url, join(this.options.imageFolderName, fileName), forceOverwrite)
+        return this.downloadFileToDisk(url, join(this.options.fileFolderName, fileName), forceOverwrite)
     }
 
     async downloadFileToDisk(url: string, filePath: string, forceOverwrite = false) {
@@ -61,16 +66,25 @@ export class FileHelper {
         }
     }
 
+    async writeItemMapToBaseDir(itemMap: any) {
+        return fsAsync.writeFile(join(this.basePath, this.options.itemMapName), JSON.stringify(itemMap), { encoding: 'utf-8' })
+    }
+
+    async loadItemMapIfExists() {
+        const json = await fsAsync.readFile(join(this.basePath, this.options.itemMapName), { encoding: 'utf-8' })
+        return JSON.parse(json) as any
+    }
+
     setBaseDir(basePath: string) {
         this.basePath = basePath
         const parts = basePath.split('/')
         let path = '/'
-        for(const part of parts) {
+        for (const part of parts) {
             path = join(path, part)
             this.ensureDirSync(path)
         }
         //* Make Sure Image Folder exists
-        this.ensureDirSync(join(path, this.options.imageFolderName))
+        this.ensureDirSync(join(path, this.options.fileFolderName))
     }
 
     ensureDirSync(path: string) {

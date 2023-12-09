@@ -3,7 +3,7 @@ import { prompt, Select } from 'enquirer'
 import SLogger, { STANDARD_LEVELS } from 'simple-node-logger'
 import { NuclinoApi, NuclinoFile } from './nuclinoApi';
 import cfg from './config'
-import { FgBlue, FgMagenta,  Reset } from './consoleColors';
+import { FgBlue, FgMagenta, FgRed, Reset } from './consoleColors';
 import { NuclinoParser } from './nuclinoParser';
 import { FileHelper } from './fileHelper';
 import { join } from 'path';
@@ -85,10 +85,6 @@ async function selectWorkspace() {
     }
     return workspace
 }
-// ? Curried Function to Download Images while theire Url-Link from Nuclino is still fresh and accessible
-const downloadImage = (fileHelper: FileHelper) => async (file: NuclinoFile) => {
-    await fileHelper.downloadImageToDisk(file.download.url, file.fileName)
-}
 
 async function cloneWorkspace() {
     const workspace = await selectWorkspace()
@@ -101,6 +97,82 @@ async function cloneWorkspace() {
 }
 
 
-async function execDbgCmd() {
-
+export enum KNOWN_DBG_CMDS {
+    BUILD_DIR_TREE = "Build Directory-Tree",
+    CREATE_LOCAL_ITEMMAP = "Create Local ItemMap",
+    PREPARE_LOCAL_DATA = "Prepare Local Data (Build DirTree + Create ItemMap)",
+    MIGRATE_FROM_LOCAL_ITEMMAP = "Migrate from local ItemMap"
 }
+
+const DBG_CMDS: Record<string, () => Promise<void>> = {
+    [KNOWN_DBG_CMDS.BUILD_DIR_TREE]: buildDirTree,
+    [KNOWN_DBG_CMDS.CREATE_LOCAL_ITEMMAP]: createLocalItemMap,
+    [KNOWN_DBG_CMDS.PREPARE_LOCAL_DATA]: prepareLocalData,
+    [KNOWN_DBG_CMDS.MIGRATE_FROM_LOCAL_ITEMMAP]: migrateFromLocalItemMap
+}
+
+const dbgPrompt = new Select({
+    name: "DBG",
+    message: "Which one?",
+    choices: Object.keys(DBG_CMDS)
+});
+
+async function execDbgCmd() {
+    const cmdIndex = (await dbgPrompt.run()) as string
+    if (DBG_CMDS[cmdIndex]) {
+        await DBG_CMDS[cmdIndex]()
+    } else {
+        console.error('Whut? How dis happen?')
+    }
+}
+
+async function buildDirTree() {
+    const workspace = await selectWorkspace()
+    log.info('Building DirTree')
+    const fileHelper = new FileHelper(log)
+    fileHelper.setBaseDir(join(__dirname, '..', 'Cloned Workspaces', workspace.name))
+    const parser = new NuclinoParser(api, fileHelper, log, { ignoreEntries: true, downloadFilesWhileBuildingDirTree: false })
+    parser.fetchItemListAndBuildDirTree(workspace)
+}
+
+async function createLocalItemMap() {
+    const workspace = await selectWorkspace()
+    log.info('Getting Local Dump of ItemMap')
+    const fileHelper = new FileHelper(log)
+    fileHelper.setBaseDir(join(__dirname, '..', 'Cloned Workspaces', workspace.name))
+    const parser = new NuclinoParser(api, fileHelper, log, { buildDirTree: false, downloadFilesWhileBuildingDirTree: false })
+    const itemMap = await parser.fetchItemListAndBuildDirTree(workspace)
+    await fileHelper.writeItemMapToBaseDir(itemMap)
+}
+
+async function prepareLocalData() {
+    const workspace = await selectWorkspace()
+    log.info('Getting Local Dump of ItemMap')
+    const fileHelper = new FileHelper(log)
+    fileHelper.setBaseDir(join(__dirname, '..', 'Cloned Workspaces', workspace.name))
+    const parser = new NuclinoParser(api, fileHelper, log, { downloadFilesWhileBuildingDirTree: false })
+    const itemMap = await parser.fetchItemListAndBuildDirTree(workspace)
+    await fileHelper.writeItemMapToBaseDir(itemMap)
+}
+
+async function migrateFromLocalItemMap() {
+    const workspace = await selectWorkspace()
+    const fileHelper = new FileHelper(log)
+    const basePath = join(__dirname, '..', 'Cloned Workspaces', workspace.name)
+    fileHelper.setBaseDir(basePath)
+    const itemMap = await fileHelper.loadItemMapIfExists()
+    if (itemMap) {
+        const parser = new NuclinoParser(api, fileHelper, log, { buildDirTree: false, downloadFilesWhileBuildingDirTree: false, forceOverwriteEntries: true })
+        parser.migrateDirTree(itemMap)
+    } else {
+        log.info(`${FgRed} ItemMap does not exist for Workspace ${workspace.name} at path ${basePath}. Consider creating it via the DBG_CMD`)
+        process.exit(0)
+    }
+}
+
+
+//TODO: Parse Nameless Image Links ![](<https://files.nuclino.com/files/5b2c3a69-b009-4abc-812e-a60664171619/House of Usher - Orodo Nocturnal X Sanguine.jpg?preview=s>)
+//TODO: Find out why this did not parse: |![Locksley Tragedy.jpg](<https://files.nuclino.com/files/7c8277ae-0859-4ca6-95f2-1e504e9ce70e/Locksley Tragedy.jpg>)|<br>                  
+//TODO: Find out how to fix Tables
+//TODO: Find out why Datasets do still not show up in items
+//TODO: Find out why David Martinez File is missing

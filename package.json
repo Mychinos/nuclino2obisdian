@@ -4,7 +4,10 @@
   "description": "Small script to convert a nuclino workspace into an obsidian vault",
   "main": "index.js",
   "scripts": {
+    "start": "node ./dist/tools",
     "tools": "ts-node ./src/tools",
+    "build": "tsc",
+    "watch": "tsc -w",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
