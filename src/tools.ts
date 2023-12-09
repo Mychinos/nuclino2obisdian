@@ -1,30 +1,30 @@
 // @ts-ignore
 import { prompt, Select } from 'enquirer'
 import SLogger, { STANDARD_LEVELS } from 'simple-node-logger'
-import { fetchFile, fetchItem, fetchWorkspaces, NUCLINO_ITEM_TYPE, NuclinoCollection, NuclinoCollectionItem, NuclinoDataItem, NuclinoEntry, NuclinoFile, NuclinoItem, NuclinoWorkspace } from './nuclino';
+import { NuclinoApi, NuclinoFile } from './nuclinoApi';
 import cfg from './config'
-import { FgBlue, FgCyan, FgGreen, FgMagenta, FgYellow, Reset } from './consoleColors';
+import { FgBlue, FgMagenta,  Reset } from './consoleColors';
+import { NuclinoParser } from './nuclinoParser';
+import { FileHelper } from './fileHelper';
+import { join } from 'path';
 
 const log = SLogger.createSimpleLogger()
 log.setLevel(cfg.LOG_LEVEL as STANDARD_LEVELS)
 
-type Datasets = {
-    files: Record<string, NuclinoFile>
-    items: Record<string, NuclinoEntry>
-    collections: Record<string, NuclinoCollection>
-}
-
+const api = new NuclinoApi(log)
 
 enum KNOWN_CMDS {
     LIST_WORKSPACES = "List Workspaces",
     FIND_WORKSPACE = "Find WorkspaceId by Name",
-    CLONE_WORKSPACE = "Clone Workspace"
+    CLONE_WORKSPACE = "Clone Workspace",
+    DEBUG_CMDS = "Debug Commands"
 }
 
 const CMDS: Record<string, () => Promise<void>> = {
     [KNOWN_CMDS.LIST_WORKSPACES]: listWorkSpaces,
     [KNOWN_CMDS.FIND_WORKSPACE]: findWorkspaceByName,
-    [KNOWN_CMDS.CLONE_WORKSPACE]: cloneWorkspace
+    [KNOWN_CMDS.CLONE_WORKSPACE]: cloneWorkspace,
+    [KNOWN_CMDS.DEBUG_CMDS]: execDbgCmd
 }
 
 const cmdPrompt = new Select({
@@ -51,7 +51,7 @@ const cmdPrompt = new Select({
 })()
 
 async function listWorkSpaces() {
-    const workspaces = await fetchWorkspaces()
+    const workspaces = await api.fetchWorkspaces()
     const printable = workspaces.map((w) => { return { name: w.name, id: w.id, teamId: w.teamId } })
     console.table(printable)
 }
@@ -62,12 +62,12 @@ async function findWorkspaceByName() {
         name: 'name',
         message: "What is the name of the Workspace",
     }) as { name: string }
-    const workspaces = await fetchWorkspaces()
+    const workspaces = await api.fetchWorkspaces()
     console.log(workspaces.find((w) => w.name === res.name || w.name.includes(res.name)))
 }
 
 async function selectWorkspace() {
-    const workspaces = await fetchWorkspaces()
+    const workspaces = await api.fetchWorkspaces()
     const wsPrompt = new Select({
         name: "WORKSPACES",
         message: "Which Workspace do you want to clone?",
@@ -85,47 +85,22 @@ async function selectWorkspace() {
     }
     return workspace
 }
+// ? Curried Function to Download Images while theire Url-Link from Nuclino is still fresh and accessible
+const downloadImage = (fileHelper: FileHelper) => async (file: NuclinoFile) => {
+    await fileHelper.downloadImageToDisk(file.download.url, file.fileName)
+}
 
 async function cloneWorkspace() {
     const workspace = await selectWorkspace()
     log.info('Start Building Datasets')
-    const { files, items, collections } = await buildDatasets(workspace)
-
-    //TODO: Use Datasets to Fix ImageLinks and References
-    // TODO: Check how to write collections
-    //TODO: Write all entries to .MD files and Images to Disk
+    const fileHelper = new FileHelper(log)
+    fileHelper.setBaseDir(join(__dirname, '..', 'Cloned Workspaces', workspace.name))
+    const parser = new NuclinoParser(api, fileHelper, log)
+    parser.cloneWorkspace(workspace)
+    log.info('All Done')
 }
 
-async function buildDatasets(item: NuclinoDataItem, datasets: Datasets = { files: {}, items: {}, collections: {} }, depth = 0) {
-    log.info(FgYellow,'Entering Depth ', depth, Reset)
-    //* Check if item is Workspace or Collection (NuclinoEntries should not show up here)
-    if (item.object === NUCLINO_ITEM_TYPE.WORKSPACE || item.object === NUCLINO_ITEM_TYPE.COLLECTION) {
-        for (let id of (item as NuclinoCollectionItem).childIds) {
-            const child = await fetchItem(id)
-            //* Fetch Children. If they are an Entry, add them to Dataset and continue
-            if (child.object === NUCLINO_ITEM_TYPE.ITEM) {
-                const itemData = await fetchItem(child.id) as NuclinoEntry
-                if (!itemData.title) {
-                    console.log(itemData)
-                }
-                log.info('Depth ', depth, ': Fetched Item: ', FgGreen, itemData.title, ' (', FgBlue, itemData.id + ')', Reset)
-                datasets.items[itemData.id] = itemData
-                if (itemData.contentMeta.fileIds.length) {
-                    for (let id of itemData.contentMeta.fileIds) {
-                        const file = await fetchFile(id)
-                        log.info('Depth', depth, ': Fetched File: ', FgCyan, file.fileName, ' (', FgBlue, file.id + ')', Reset)
-                        datasets.files[file.id] = file
-                    }
-                }
-                continue
-                //* Elsewise add Collection to Dataset and itterate Collection Children 
-            } else if (child.object === NUCLINO_ITEM_TYPE.COLLECTION) {
-                log.info('Depth', depth, ': Fetched ', FgMagenta, child.title, ' (', FgBlue, child.id + ')', Reset)
-                datasets.collections[child.id] = child as NuclinoCollection
-                await buildDatasets(child, datasets, depth++)
-            }
-        }
-    }
-    return datasets
-}
 
+async function execDbgCmd() {
+
+}
