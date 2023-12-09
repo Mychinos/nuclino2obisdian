@@ -1,6 +1,6 @@
 import { FileHelper, FileWriteRequest } from './fileHelper';
 import { NuclinoApi, NUCLINO_ITEM_TYPE, NuclinoCollection, NuclinoCollectionItem, NuclinoDataItem, NuclinoEntry, NuclinoFile, NuclinoItem, NuclinoWorkspace } from './nuclinoApi';
-import { FgBlue, FgCyan, FgGreen, FgMagenta, FgRed, FgYellow, Reset } from './consoleColors';
+import { BgRed, FgBlue, FgCyan, FgGreen, FgMagenta, FgRed, FgWhite, FgYellow, Reset } from './consoleColors';
 import type SLogger from 'simple-node-logger'
 
 
@@ -14,6 +14,8 @@ const fileNameExpr = /!\[[a-zA-ZÀ-ȕ0-9\\\(\)\s:?_.,-]+\]/gm
 const fileUrlExpr = /\([<]{0,1}https:\/\/[a-zA-Z0-9\/:=\s?_.,<>-]+\)/gm
 const imgExpr = /!\[[a-zA-ZÀ-ȕ0-9\\\(\)\s:?_.,-]+\]\([<]{0,1}https:\/\/[a-zA-Z0-9\/:=\s?_.,<>-]+[>]{0,1}\)/gm
 const namelessImgExpr = /!\[\]\([<]{0,1}https:\/\/[a-zA-Z0-9\/:?_.,<>=\s-]+[>]{0,1}\)/gm
+
+const tableDelimiter = /\+[\-]+\+[\-]+\+/gm
 
 export type Datasets = {
     files: Record<string, NuclinoFile>
@@ -79,7 +81,7 @@ export class NuclinoParser {
                 const nameMatch = matchedString.match(fileNameExpr)
                 //! We matched this with the Combined Regex. Could that have matched if the substring does not?
                 const urlMatch = matchedString.match(fileUrlExpr)!
-                
+
                 const urlInBrackets = urlMatch[0]
                 // ? Here we might have an additional '<>' Pair to cut
                 const cutLength = urlInBrackets.charAt(1) === '<' ? 2 : 1
@@ -92,7 +94,7 @@ export class NuclinoParser {
                     // ? Here we have an additional '!' to cut
                     name = nameInBrackets.slice(2, nameInBrackets.length - 1)
                 }
-                
+
                 return {
                     match: matchedString,
                     fileName: name,
@@ -133,8 +135,80 @@ export class NuclinoParser {
         return content
     }
 
+    /**
+     * Nuclino Table Example  
+     '+------------------------------------------------------------------------------------------------------------------------+-------------------------------------+\n' +
+    '|                                                                                                                        |Name: David Martinez                 |\n' +
+    '|                                                                                                                        |                                     |\n' +
+    '|                                                                                                                        |Alter:38                             |\n' +
+    '+------------------------------------------------------------------------------------------------------------------------+-------------------------------------+\n' +
+    '|<!-- image display=small -->                                                                                            |                                     |\n' +
+    '|![](https://files.nuclino.com/files/e6907581-2b99-4223-8fa0-23a1ca2a386c/9960c58e17de19b4c9b137dea8aecd71.jpg?preview=s)|                                     |\n' +
+    '|                                                                                                                        |Attribute:                           |\n' +
+    '|                                                                                                                        |Zuständigkeitsbereich: Song Funkytown|\n' +
+    '+------------------------------------------------------------------------------------------------------------------------+-------------------------------------+\n' +
+     *  
+     * 
+     */
+
+    /**
+     * Obsidian Table Example:
+     *  |      | Name: David Martinez  </br> </br> Alter:38 |
+     *  | --- | --- |
+     * | <!-- image display=small --> </br> ![](URL_SHORT) | </br> </br> Attribute </br> ETC ETC |
+     */
+
+    buildObsidianRowSignifier(count = 1){
+        let collumnSignifier = '| --- |'
+        while(count > 1) {
+            collumnSignifier += ' --- |'
+        }
+        return collumnSignifier
+    }
+
+    extractTableData(content: string) {
+        //? Our Collums are signified by +------+------+ [variable count of Slashes]
+        const matches = [...content.matchAll(tableDelimiter)]
+        if (matches.length) {
+            const first = matches[0].index!
+            const last = matches[matches.length - 1].index! + matches[matches.length - 1][0].length
+            //? We cut the Firest and Last Collumn Signifier
+            const sub = content.slice(first, last)
+            const table: string[][] = [] 
+            let rowCount = 1
+            const parts = sub.split('\n').map((e) => {
+                if (e.charAt(0) === '|') {
+                    //? Every cell in this Row is encased by "|"-Signs. 
+                    //? Cuting the first and the last we can now split at "|" to get an Array of all Cells 
+                    const colls = e.slice(1, e.length - 1).split('|')
+                    colls.forEach((col, i) => {
+                        table[rowCount - 1][i] 
+                        //TODO: Create Obsidian Table Format
+                    })
+                    return colls
+                }
+                //? Since we differentiate Rows from Collumn-Signifier-lines by "|" and "+", 
+                //? all Entries in "parts" that are not arrays must indicate the start of a new Row
+                //? So we exchange it with our Obsidian Table Signifier
+                rowCount++
+                return this.buildObsidianRowSignifier(rowCount)
+            })
+            parts.splice(0, 1)
+            parts[parts.length - 1] = this.buildObsidianRowSignifier(rowCount)
+
+            console.log(sub)
+            //TODO: Convert to Obsidian Plugin Table or think of something else
+        }
+    }
+
     replaceLinksAndImagesInContent(_item: NuclinoEntry, itemMap: Record<string, NuclinoItem>) {
         return this.replaceImages(this.replaceLinks(_item.content, itemMap), itemMap)
+    }
+
+    normalizeTitle(title: string) {
+        return title
+            .replace(/\//gm, '-') //? Slashes create Problems, because they get interpeted as Paths
+            .replace(/#/, 'Nr.') //? Hashtags get interpreted as Obsidian Tags, which creates Problems if used inside a Link
     }
 
     async cloneWorkspace(workspace: NuclinoWorkspace) {
@@ -154,7 +228,7 @@ export class NuclinoParser {
                 //* Fetch Children. If they are an Entry, add them to Dataset and continue
                 if (child.object === NUCLINO_ITEM_TYPE.ITEM && !this.options.ignoreEntries) {
                     const itemData = await this.api.fetchItem(child.id) as NuclinoEntry
-                    itemData.title = itemData.title.replace(/\//gm, '-')
+                    itemData.title = this.normalizeTitle(itemData.title)
                     this.log.info('Depth ', depth, ': Fetched Item: ', FgGreen, itemData.title, ' (', FgBlue, itemData.id + ')', Reset)
                     itemData.path = path + '/' + itemData.title
                     itemMap[itemData.id] = itemData
@@ -175,7 +249,7 @@ export class NuclinoParser {
                     continue
                     //* Elsewise add Collection to DirTree and itterate Collection Children 
                 } else if (child.object === NUCLINO_ITEM_TYPE.COLLECTION) {
-                    child.title = child.title.replace(/\//gm, '-')
+                    child.title = this.normalizeTitle(child.title)
                     this.log.info('Depth', depth, ': Fetched Collection ', FgMagenta, child.title, ' (', FgBlue, child.id + ')', Reset)
                     child.path = path + '/' + child.title
                     itemMap[child.id] = child
@@ -189,13 +263,13 @@ export class NuclinoParser {
 
     async migrateDirTree(itemMap: Record<string, NuclinoItem>) {
         const fileRequests: FileWriteRequest[] = Object.values(itemMap).filter(i => i.object === NUCLINO_ITEM_TYPE.ITEM)
-        .map((item) => {
-            const req = {
-                content: this.replaceLinksAndImagesInContent(item as NuclinoEntry, itemMap),
-                path: item.path! + '.md'
-            }
-            return req
-        })
+            .map((item) => {
+                const req = {
+                    content: this.replaceLinksAndImagesInContent(item as NuclinoEntry, itemMap),
+                    path: item.path! + '.md'
+                }
+                return req
+            })
         await this.fileHelper.writeFileBatchesIntoDirTree(fileRequests, this.options.fileWriteBatchSize, this.options.forceOverwriteEntries)
     }
 

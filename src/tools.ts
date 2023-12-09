@@ -1,3 +1,4 @@
+import { UUID } from 'crypto';
 // @ts-ignore
 import { prompt, Select } from 'enquirer'
 import SLogger, { STANDARD_LEVELS } from 'simple-node-logger'
@@ -101,14 +102,16 @@ export enum KNOWN_DBG_CMDS {
     BUILD_DIR_TREE = "Build Directory-Tree",
     CREATE_LOCAL_ITEMMAP = "Create Local ItemMap",
     PREPARE_LOCAL_DATA = "Prepare Local Data (Build DirTree + Create ItemMap)",
-    MIGRATE_FROM_LOCAL_ITEMMAP = "Migrate from local ItemMap"
+    MIGRATE_FROM_LOCAL_ITEMMAP = "Migrate from local ItemMap",
+    FETCH_FILE = "Fetch File"
 }
 
 const DBG_CMDS: Record<string, () => Promise<void>> = {
     [KNOWN_DBG_CMDS.BUILD_DIR_TREE]: buildDirTree,
     [KNOWN_DBG_CMDS.CREATE_LOCAL_ITEMMAP]: createLocalItemMap,
     [KNOWN_DBG_CMDS.PREPARE_LOCAL_DATA]: prepareLocalData,
-    [KNOWN_DBG_CMDS.MIGRATE_FROM_LOCAL_ITEMMAP]: migrateFromLocalItemMap
+    [KNOWN_DBG_CMDS.MIGRATE_FROM_LOCAL_ITEMMAP]: migrateFromLocalItemMap,
+    [KNOWN_DBG_CMDS.FETCH_FILE]: fetchFile
 }
 
 const dbgPrompt = new Select({
@@ -171,8 +174,17 @@ async function migrateFromLocalItemMap() {
 }
 
 
-//TODO: Parse Nameless Image Links ![](<https://files.nuclino.com/files/5b2c3a69-b009-4abc-812e-a60664171619/House of Usher - Orodo Nocturnal X Sanguine.jpg?preview=s>)
-//TODO: Find out why this did not parse: |![Locksley Tragedy.jpg](<https://files.nuclino.com/files/7c8277ae-0859-4ca6-95f2-1e504e9ce70e/Locksley Tragedy.jpg>)|<br>                  
+async function fetchFile() {
+    const res = await prompt({
+        type: 'input',
+        name: 'name',
+        message: "Id of the File?",
+    }) as { name: UUID }
+   console.log((await api.fetchItem(res.name)))
+}
+
+
+
 //TODO: Find out how to fix Tables
 //TODO: Find out why Datasets do still not show up in items
 //TODO: Find out why David Martinez File is missing
