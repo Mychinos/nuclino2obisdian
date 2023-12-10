@@ -89,8 +89,9 @@ export class NuclinoParser {
                 const urlParts = url.split('/')
                 // ? Some links with empty names (where we extract the name from our url) have queryParameters, we do not want
                 let name = urlParts[urlParts.length - 1].split('?')[0]
-                if (nameMatch && nameMatch[0]) {
-                    const nameInBrackets = nameMatch[0]
+                if (!name && nameMatch && nameMatch[0]) {
+                    //? Nuclino escapes different characters inside the name. We need to unescape them so that obisdian can find the images with theire correct name
+                    const nameInBrackets = nameMatch[0].replace('\\', '')
                     // ? Here we have an additional '!' to cut
                     name = nameInBrackets.slice(2, nameInBrackets.length - 1)
                 }
@@ -120,13 +121,14 @@ export class NuclinoParser {
                 this.log.error('Could not find linked Item: ', link.id, ' in Datasets! Seems to be Collection')
                 return
             }
-            const obsidianLink = `[[${linkedItem.path}|${link.name}]]`
+            //? If we dont escape the pipe-char the link might break Tabledata
+            const obsidianLink = `[[${linkedItem.path}\\|${link.name}]]`
             content = content.replace(link.match, obsidianLink)
         })
         return content
     }
 
-    replaceImages(content: string, itemMap: Record<string, NuclinoItem>) {
+    replaceImages(content: string) {
         const imgs = this.extractImageData(content)
         imgs.forEach((link) => {
             const obsidianLink = `![[${link.fileName}]]`
@@ -158,51 +160,74 @@ export class NuclinoParser {
      * | <!-- image display=small --> </br> ![](URL_SHORT) | </br> </br> Attribute </br> ETC ETC |
      */
 
-    buildObsidianRowSignifier(count = 1){
+    buildObsidianRowSignifier(count = 1) {
         let collumnSignifier = '| --- |'
-        while(count > 1) {
+        while (count > 1) {
             collumnSignifier += ' --- |'
+            count--
         }
         return collumnSignifier
     }
 
-    extractTableData(content: string) {
+
+    replaceTableData(content: string) {
         //? Our Collums are signified by +------+------+ [variable count of Slashes]
         const matches = [...content.matchAll(tableDelimiter)]
         if (matches.length) {
             const first = matches[0].index!
             const last = matches[matches.length - 1].index! + matches[matches.length - 1][0].length
-            //? We cut the Firest and Last Collumn Signifier
+            //? Cut the Table from the Content
             const sub = content.slice(first, last)
-            const table: string[][] = [] 
-            let rowCount = 1
-            const parts = sub.split('\n').map((e) => {
+
+            const colCutIndices = [...matches[0][0].matchAll(/\+/gm)].map(m => m.index!)
+            let rowCount = 0
+            const table: Array<Array<string>> = [[]]
+
+            sub.split('\n').forEach((e) => {
+                //? Use the first char to see if we have a dataline or a Row-Delimiter
                 if (e.charAt(0) === '|') {
-                    //? Every cell in this Row is encased by "|"-Signs. 
-                    //? Cuting the first and the last we can now split at "|" to get an Array of all Cells 
-                    const colls = e.slice(1, e.length - 1).split('|')
+                    //? Cut all Colls using the char indices we got from our first Row-Delimiter
+                    const colls: string[] = []
+                    for (let i = 0; i < colCutIndices.length - 1; i++) {
+                        let content = e.slice(colCutIndices[i], colCutIndices[i + 1])
+                        if (content.charAt(0) === '|') {
+                            content = content.slice(1)
+                        }
+                        if (content.charAt(content.length - 1) === '|') {
+                            content = content.slice(0, content.length - 1)
+                        }
+                        //
+                        colls.push(content.replace(/\|/gm, '\\|'))
+                    }
+                    if (!table[rowCount - 1]) {
+                        table[rowCount - 1] = []
+                    }
                     colls.forEach((col, i) => {
-                        table[rowCount - 1][i] 
-                        //TODO: Create Obsidian Table Format
+                        if (!table[rowCount - 1][i]) {
+                            table[rowCount - 1][i] = col.trim()
+                            return
+                        }
+                        table[rowCount - 1][i] += ' </br> ' + col.trim()
                     })
                     return colls
                 }
-                //? Since we differentiate Rows from Collumn-Signifier-lines by "|" and "+", 
-                //? all Entries in "parts" that are not arrays must indicate the start of a new Row
-                //? So we exchange it with our Obsidian Table Signifier
+                //? We differentiate Rows from Collumn-Signifier-lines by "|" and "+", 
                 rowCount++
-                return this.buildObsidianRowSignifier(rowCount)
             })
-            parts.splice(0, 1)
-            parts[parts.length - 1] = this.buildObsidianRowSignifier(rowCount)
-
-            console.log(sub)
-            //TODO: Convert to Obsidian Plugin Table or think of something else
+            const tableString = table.reduce((tableString, row, i, arr) => {
+                const rowString = '| ' + row.join(' | ') + ' |'
+                tableString += rowString
+                if (i !== arr.length - 1) { tableString += ' \n ' + this.buildObsidianRowSignifier(row.length) + ' \n ' }
+                return tableString
+            }, '')
+            return content.replace(sub, tableString)
         }
+        return content
     }
 
-    replaceLinksAndImagesInContent(_item: NuclinoEntry, itemMap: Record<string, NuclinoItem>) {
-        return this.replaceImages(this.replaceLinks(_item.content, itemMap), itemMap)
+    replaceLinksImagesAndTablesInContent(_item: NuclinoEntry, itemMap: Record<string, NuclinoItem>) {
+        console.log('MAP LENGTH', Object.keys(itemMap.keys))
+        return this.replaceImages(this.replaceLinks(this.replaceTableData(_item.content), itemMap))
     }
 
     normalizeTitle(title: string) {
@@ -265,7 +290,7 @@ export class NuclinoParser {
         const fileRequests: FileWriteRequest[] = Object.values(itemMap).filter(i => i.object === NUCLINO_ITEM_TYPE.ITEM)
             .map((item) => {
                 const req = {
-                    content: this.replaceLinksAndImagesInContent(item as NuclinoEntry, itemMap),
+                    content: this.replaceLinksImagesAndTablesInContent(item as NuclinoEntry, itemMap),
                     path: item.path! + '.md'
                 }
                 return req

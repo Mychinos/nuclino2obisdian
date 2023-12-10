@@ -183,8 +183,4 @@ async function fetchFile() {
    console.log((await api.fetchItem(res.name)))
 }
 
-
-
-//TODO: Find out how to fix Tables
-//TODO: Find out why Datasets do still not show up in items
-//TODO: Find out why David Martinez File is missing
+//TODO: Find out how to get missing Items (which are probably linked datasets...)

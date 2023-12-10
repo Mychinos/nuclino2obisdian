@@ -8,6 +8,7 @@
     "tools": "ts-node ./src/tools",
     "build": "tsc",
     "watch": "tsc -w",
+    "dbg": "ts-node ./src/TableTest",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
