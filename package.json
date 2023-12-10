@@ -2,8 +2,9 @@
   "name": "nuclino2obisdian",
   "version": "1.0.0",
   "description": "Small script to convert a nuclino workspace into an obsidian vault",
-  "main": "index.js",
+  "main": "./dist/tools.js",
   "scripts": {
+    "prestart": "tsc",
     "start": "node ./dist/tools",
     "tools": "ts-node ./src/tools",
     "build": "tsc",
