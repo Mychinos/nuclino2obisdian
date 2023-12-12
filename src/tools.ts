@@ -2,10 +2,10 @@ import { UUID } from 'crypto';
 // @ts-ignore
 import { prompt, Select } from 'enquirer'
 import SLogger, { STANDARD_LEVELS } from 'simple-node-logger'
-import { NuclinoApi, NuclinoFile } from './nuclinoApi';
+import { NUCLINO_ITEM_TYPE, NuclinoApi, NuclinoCollection, NuclinoCollectionItem, NuclinoEntry, NuclinoFile, NuclinoWorkspace } from './nuclinoApi';
 import cfg from './config'
-import { FgBlue, FgMagenta, FgRed, Reset } from './consoleColors';
-import { NuclinoParser } from './nuclinoParser';
+import { FgBlue, FgGreen, FgMagenta, FgRed, FgYellow, Reset } from './consoleColors';
+import { NuclinoParser, Datasets } from './nuclinoParser';
 import { FileHelper } from './fileHelper';
 import { join } from 'path';
 
@@ -18,6 +18,7 @@ enum KNOWN_CMDS {
     LIST_WORKSPACES = "List Workspaces",
     FIND_WORKSPACE = "Find WorkspaceId by Name",
     CLONE_WORKSPACE = "Clone Workspace",
+    FETCH_LOCAL_JSON_DUMB = "Fetch Copy of Workspace Data as Json",
     DEBUG_CMDS = "Debug Commands"
 }
 
@@ -25,6 +26,7 @@ const CMDS: Record<string, () => Promise<void>> = {
     [KNOWN_CMDS.LIST_WORKSPACES]: listWorkSpaces,
     [KNOWN_CMDS.FIND_WORKSPACE]: findWorkspaceByName,
     [KNOWN_CMDS.CLONE_WORKSPACE]: cloneWorkspace,
+    [KNOWN_CMDS.FETCH_LOCAL_JSON_DUMB]: fetchAndDumbToJson,
     [KNOWN_CMDS.DEBUG_CMDS]: execDbgCmd
 }
 
@@ -85,6 +87,34 @@ async function selectWorkspace() {
         throw new Error('Could not find Selected Workspace in Workspace list... how did you select something that is not in the selection list... like srsly?')
     }
     return workspace
+}
+
+type WorkspaceDataset = { workspace: NuclinoWorkspace, items: Record<UUID, NuclinoEntry>, collections: Record<UUID, NuclinoCollection> }
+
+async function fetchAndDumbToJson() {
+    const workspace = await selectWorkspace()
+    const fileHelper = new FileHelper(log)
+    fileHelper.setBaseDir(join(__dirname, '..', 'Json Copy', workspace.name))
+    const dataset: WorkspaceDataset = { workspace, items: {}, collections: {} }
+    await getDataRecursivly(workspace, dataset, {count: 0})
+    await fileHelper.writeItemMapToBaseDir(dataset)
+    console.log(FgGreen, 'All Done!')
+}
+
+async function getDataRecursivly(collection: NuclinoCollectionItem, dataset: WorkspaceDataset, proc: {count: number}) {
+    for (const id of collection.childIds) {
+        const item = await api.fetchItem(id)
+        process.stdout.clearLine(0);
+        process.stdout.cursorTo(0);
+        process.stdout.write(`${FgGreen}Fetched item ${FgYellow}${proc.count++}: ${FgMagenta}${id}${Reset}`)
+        if (item.object === NUCLINO_ITEM_TYPE.ITEM) {
+            dataset.items[item.id] = item as NuclinoEntry
+        } else {
+            dataset.collections[item.id] = item as NuclinoCollection
+            await getDataRecursivly(item as NuclinoCollection, dataset, proc)
+        }
+    }
+    return dataset
 }
 
 async function cloneWorkspace() {
@@ -180,7 +210,7 @@ async function fetchFile() {
         name: 'name',
         message: "Id of the File?",
     }) as { name: UUID }
-   console.log((await api.fetchItem(res.name)))
+    console.log((await api.fetchItem(res.name)))
 }
 
 //TODO: Find out how to get missing Items (which are probably linked datasets...)
