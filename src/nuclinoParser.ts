@@ -226,7 +226,7 @@ export class NuclinoParser {
     }
 
     replaceLinksImagesAndTablesInContent(_item: NuclinoEntry, itemMap: Record<string, NuclinoItem>) {
-        console.log('MAP LENGTH', Object.keys(itemMap.keys))
+        // console.log('MAP LENGTH', Object.keys(itemMap.keys))
         return this.replaceImages(this.replaceLinks(this.replaceTableData(_item.content), itemMap))
     }
 
@@ -284,6 +284,21 @@ export class NuclinoParser {
             }
         }
         return itemMap
+    }
+
+    parseItemData(itemMap: Record<string, NuclinoItem>) {
+        const fileRequests = Object.values(itemMap)
+            .filter(i => {return i.object === NUCLINO_ITEM_TYPE.ITEM})
+            .map((item) => {
+                console.log(item.title)
+                const itm = {
+                    parsedContent: this.replaceLinksImagesAndTablesInContent(item as NuclinoEntry, itemMap),
+                    path: item.path! + '.md',
+                    ...item
+                }
+                return itm
+            })
+        return fileRequests
     }
 
     async migrateDirTree(itemMap: Record<string, NuclinoItem>) {

@@ -2,12 +2,13 @@ import { UUID } from 'crypto';
 // @ts-ignore
 import { prompt, Select } from 'enquirer'
 import SLogger, { STANDARD_LEVELS } from 'simple-node-logger'
-import { NUCLINO_ITEM_TYPE, NuclinoApi, NuclinoCollection, NuclinoCollectionItem, NuclinoEntry, NuclinoFile, NuclinoWorkspace } from './nuclinoApi';
+import { NUCLINO_ITEM_TYPE, NuclinoApi, NuclinoCollection, NuclinoCollectionItem, NuclinoEntry, NuclinoFile, NuclinoItem, NuclinoWorkspace } from './nuclinoApi';
 import cfg from './config'
 import { FgBlue, FgGreen, FgMagenta, FgRed, FgYellow, Reset } from './consoleColors';
 import { NuclinoParser, Datasets } from './nuclinoParser';
 import { FileHelper } from './fileHelper';
 import { join } from 'path';
+import * as fs from 'fs'
 
 const log = SLogger.createSimpleLogger()
 log.setLevel(cfg.LOG_LEVEL as STANDARD_LEVELS)
@@ -96,12 +97,12 @@ async function fetchAndDumbToJson() {
     const fileHelper = new FileHelper(log)
     fileHelper.setBaseDir(join(__dirname, '..', 'Json Copy', workspace.name))
     const dataset: WorkspaceDataset = { workspace, items: {}, collections: {} }
-    await getDataRecursivly(workspace, dataset, {count: 0})
+    await getDataRecursivly(workspace, dataset, { count: 0 })
     await fileHelper.writeItemMapToBaseDir(dataset)
     console.log(FgGreen, 'All Done!')
 }
 
-async function getDataRecursivly(collection: NuclinoCollectionItem, dataset: WorkspaceDataset, proc: {count: number}) {
+async function getDataRecursivly(collection: NuclinoCollectionItem, dataset: WorkspaceDataset, proc: { count: number }) {
     for (const id of collection.childIds) {
         const item = await api.fetchItem(id)
         process.stdout.clearLine(0);
@@ -133,7 +134,8 @@ export enum KNOWN_DBG_CMDS {
     CREATE_LOCAL_ITEMMAP = "Create Local ItemMap",
     PREPARE_LOCAL_DATA = "Prepare Local Data (Build DirTree + Create ItemMap)",
     MIGRATE_FROM_LOCAL_ITEMMAP = "Migrate from local ItemMap",
-    FETCH_FILE = "Fetch File"
+    FETCH_FILE = "Fetch File",
+    PARSE_TO_UM = "Parse to Um"
 }
 
 const DBG_CMDS: Record<string, () => Promise<void>> = {
@@ -141,7 +143,8 @@ const DBG_CMDS: Record<string, () => Promise<void>> = {
     [KNOWN_DBG_CMDS.CREATE_LOCAL_ITEMMAP]: createLocalItemMap,
     [KNOWN_DBG_CMDS.PREPARE_LOCAL_DATA]: prepareLocalData,
     [KNOWN_DBG_CMDS.MIGRATE_FROM_LOCAL_ITEMMAP]: migrateFromLocalItemMap,
-    [KNOWN_DBG_CMDS.FETCH_FILE]: fetchFile
+    [KNOWN_DBG_CMDS.FETCH_FILE]: fetchFile,
+    [KNOWN_DBG_CMDS.PARSE_TO_UM]: parseToUmDbFormat
 }
 
 const dbgPrompt = new Select({
@@ -203,6 +206,73 @@ async function migrateFromLocalItemMap() {
     }
 }
 
+export type UmItem = {
+    children: []
+    content: string
+    image: string
+    images: string[]
+    name: string
+    tags: string[]
+    type: string
+    path: string[]
+}
+
+
+const ImageBaseUrl = "https://storage.googleapis.com/bedlam/images/"
+async function parseToUmDbFormat() {
+    // console.log(join(__dirname, 'test.json'))
+    // const workspace = await selectWorkspace()
+    // log.info('Start Building Datasets')
+    // const fileHelper = new FileHelper(log)
+    // fileHelper.setBaseDir(join(__dirname, '..', 'Cloned Workspaces', workspace.name))
+    // const parser = new NuclinoParser(api, fileHelper, log)
+    // const itemMap = JSON.parse(fs.readFileSync(join(process.cwd(), 'map.json'), { encoding: 'utf-8' }))
+    // const data = parser.parseItemData(itemMap as any)
+    // console.log(data)
+    // fs.writeFileSync(join(process.cwd(), 'test.json'), JSON.stringify(data, null, 2), { encoding: 'utf-8' })
+    const types: {[key: string]: boolean} = {}
+
+    const itemMap = JSON.parse(fs.readFileSync(join(process.cwd(), 'test.json'), { encoding: 'utf-8' })) as (NuclinoItem & { parsedContent: string, path: string })[]
+    for (let item of itemMap) {
+        if (item.path.charAt(0) === '/') {
+            item.path = item.path.substring(1, item.path.length)
+        }
+        const path = item.path.split('/')
+        const umItem: UmItem = {
+            children: [],
+            content: item.parsedContent,
+            image: '',
+            images: [],
+            name: item.title,
+            tags: [],
+            path,
+            type: path[0]
+        }
+        types[path[0]] = true
+        const imageExpr = item.parsedContent.match(/!\[\[[\w\/:?_.,<>=\s-]+\]\]/gm)
+        if (imageExpr) {
+            umItem.images = imageExpr.map((e) => ImageBaseUrl + e.substring(3, e.length - 2))
+            umItem.image = umItem.images[0]
+        }
+        // await uploadItem(umItem)
+        console.log(types)
+    }
+}
+import fb from './firebase'
+import * as admin from 'firebase-admin'
+if (!admin.apps.length) {
+    admin.initializeApp({
+        credential: admin.credential.cert({
+            clientEmail: fb.client_email,
+            privateKey: fb.private_key,
+            projectId: fb.project_id
+        })
+    })
+}
+async function uploadItem(item: any) {
+    const a = await admin.firestore().collection('/bedlam_entity').add(item)
+    console.log(a)
+}
 
 async function fetchFile() {
     const res = await prompt({
